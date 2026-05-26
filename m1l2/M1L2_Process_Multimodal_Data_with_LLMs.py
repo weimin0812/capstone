@@ -1,23 +1,26 @@
-import numpy as np
-import matplotlib.pyplot as plt
+import ast
+import base64
 import json
 import os
-from PIL import Image
-import base64
-import zipfile
-import ast
+
+import matplotlib.pyplot as plt
 import requests
-from tenacity import retry, stop_after_attempt, wait_exponential
+from PIL import Image
 from dotenv import load_dotenv
 from openai import OpenAI
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 # Load environment variables to safely store API key
 load_dotenv()
 
+
 # Suppress all unnecessary warnings
 def warn(*args, **kwargs):
     pass
+
+
 import warnings
+
 warnings.warn = warn
 warnings.filterwarnings('ignore')
 
@@ -50,6 +53,7 @@ recipe_img = Image.open(first_img_path)
 plt.imshow(recipe_img)
 plt.axis("off")
 plt.show()
+
 
 # ======================
 # Step 2: Define vision LLM function using DeepSeek multimodal model
@@ -95,6 +99,7 @@ def vision_llm(system_msg, prompt_txt, image_path):
     )
     return response.choices[0].message.content
 
+
 # ======================
 # Step 3: Design prompt template for food image caption
 # ======================
@@ -108,6 +113,7 @@ def image_caption_prompt_template(food_name):
     image_caption_system_msg = "You are a professional food content writer. Describe food images accurately and vividly in formal English."
     image_caption_prompt_txt = f"Describe the appearance, color and plating style of this {food_name} food image concisely, keep output within two sentences."
     return image_caption_system_msg, image_caption_prompt_txt
+
 
 ### Step 3.2: Get the prompts with the food name of the first recipe
 test_food_name = first_recipe["name"]
@@ -123,12 +129,12 @@ print(response)
 # ======================
 for i in range(len(recipe_data)):
     if (i + 1) % 20 == 0:
-        print(f'{i+1} out of {len(recipe_data)} is done')
+        print(f'{i + 1} out of {len(recipe_data)} is done')
 
     ### Step 4.1: Get the caption prompts
     current_food = recipe_data[i]["name"]
     current_sys, current_prompt = image_caption_prompt_template(current_food)
-    current_img_path = f"synthetic_recipe_images/recipe{i+1}.png"
+    current_img_path = f"synthetic_recipe_images/recipe{i + 1}.png"
 
     ### Step 4.2: Get the response with the prompts
     response = vision_llm(current_sys, current_prompt, current_img_path)
@@ -175,6 +181,7 @@ if review_image_url_list:
     plt.axis("off")
     plt.show()
 
+
 # ======================
 # Part 2: Design prompt with review context
 # ======================
@@ -189,6 +196,7 @@ def review_context_image_caption_prompt_template(reviews):
     review_context_image_caption_prompt_txt = f"User actual review content: {reviews}\nPlease describe this food image according to user's review attitude and feelings."
     return review_context_image_caption_system_msg, review_context_image_caption_prompt_txt
 
+
 ### Step 2.2: Get the prompts
 review_text_content = first_review["text"]
 rev_sys_msg, rev_user_prompt = review_context_image_caption_prompt_template(review_text_content)
@@ -197,6 +205,7 @@ rev_sys_msg, rev_user_prompt = review_context_image_caption_prompt_template(revi
 response = vision_llm(rev_sys_msg, rev_user_prompt, 'review_image_placeholder.jpg')
 print("\n===== Review Context Image Description =====")
 print(response)
+
 
 # ======================
 # Part 3: Batch process all user review images with retry mechanism
@@ -208,6 +217,7 @@ def get_data_with_retry(url):
     response = requests.get(url, timeout=5)
     response.raise_for_status()  # Must raise error for retry to trigger
     return response
+
 
 # Loop through all user review records
 for i in range(len(user_review_data)):
