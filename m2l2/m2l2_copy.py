@@ -1,12 +1,7 @@
-# ================================
-# Import dependencies
-# ================================
 
-# Standard library
 import os
 from pathlib import Path
 
-# Third-party library
 import numpy as np
 import torch
 from PIL import Image
@@ -14,13 +9,11 @@ from langchain_chroma import Chroma
 from sentence_transformers import SentenceTransformer
 from transformers import CLIPModel, CLIPProcessor
 
-print("✅ Environment ready")
+from m2l1.m2l1_lab import text_model
+from m2l2.m2l2 import n_articles
 
-# ================================
-# Verify vector database
-# ================================
-
-DB_DIR = str((Path.home() / "chroma_multimodal").resolve())
+print("Environment ready")
+DB_DIR = str((Path.home()/"chroma_multimodal").resolve())
 
 if not os.path.isdir(DB_DIR):
     raise RuntimeError(
@@ -50,27 +43,18 @@ print(f"✅ Article vectors: {n_articles}")
 print(f"✅ Image vectors:   {n_images}")
 
 
-
-
-# ================================
-# Initialize embedding models
-# ================================
-
-# ---- Text embedding model (384-d) ----
-text_model = SentenceTransformer("all-MiniLM-L6-v2")
+text_model = SentenceTransformer("all-miniLM-L6-v2")
 
 def embed_texts(texts, batch_size=64):
     return text_model.encode(
         texts,
         batch_size=batch_size,
         show_progress_bar=False,
-        normalize_embeddings=True,  # cosine-ready
+        normalize_embeddings=True,
     ).astype(np.float32)
 
 print("✅ Text embedder ready")
 
-
-# ---- Image embedding model (512-d) ----
 device = "cpu"
 clip_name = "openai/clip-vit-base-patch32"
 clip_model = CLIPModel.from_pretrained(clip_name).to(device)
@@ -80,32 +64,22 @@ clip_model.eval()
 @torch.no_grad()
 def embed_images(paths, batch_size=16):
     vecs = []
-    for i in range(0, len(paths), batch_size):
+    for i in range(0,len(paths), batch_size):
         batch = paths[i:i+batch_size]
-        imgs = [Image.open(p).convert("RGB") for p in batch]
+        imgs = [Image.open(p).convert("RGB") for p in paths]
         inputs = clip_processor(images=imgs, return_tensors="pt").to(device)
-        feats = clip_model.get_image_features(**inputs)          # (B,512)
-        feats = feats / feats.norm(dim=-1, keepdim=True)         # cosine-ready
+        feats = clip_model.get_image_features(**inputs)
+        feats = feats/feats.norm(dim=-1, keepdim=True)
         vecs.append(feats.cpu().numpy().astype(np.float32))
     return np.vstack(vecs)
 
-print("✅ Image embedder ready")
-
-
-
-
-
-# ================================
-# Retrieval utilities
-# ================================
-
-# Chroma returns lists-of-lists; unwrap the first query.
 def _unwrap(res: dict):
-    ids = res.get("ids", [[]])[0]
-    docs = res.get("documents", [[]])[0]
+    ids = res.get("ids",[[]])[0]
+    docs = res.get("documents",[[]])[0]
     metas = res.get("metadatas", [[]])[0]
     dists = res.get("distances", [[]])[0]
     return ids, docs, metas, dists
+
 
 def print_hits(ids, docs, metas, dists, title: str, max_chars: int = 180):
     print(f"\n=== {title} ===")
@@ -126,38 +100,20 @@ def print_hits(ids, docs, metas, dists, title: str, max_chars: int = 180):
         print(f"[{i+1}] id={doc_id} | cuisine={cuisine} | location={location} | source={source} | distance={dist:.4f}")
         print(f"{snippet}")
 
-
-
-# ================================
-# Article retrieval
-# ================================
-
-# Similarity retrieval over restaurant articles with optional metadata filtering.
-def retrieve_articles(query: str, k: int = 5, where: dict | None = None):
-
-    q_vec = embed_texts([query])[0]  # 384-d, cosine-ready
-
+def retrieve_articles(query: str, k: int = 5, where: dict | None=None):
+    q_vec = embed_texts([query])[0]
     res = article_db._collection.query(
         query_embeddings=[q_vec.tolist()],
         n_results=k,
         where=where,
         include=["documents", "metadatas", "distances"],
     )
+
     return _unwrap(res)
 
-print("✅ Article retrieval ready")
 
-
-
-# ================================
-# Image retrieval
-# ================================
-
-# Similarity retrieval over food images using an image query.
-def retrieve_images_by_image(query_image_path: str, k: int = 5, where: dict | None = None):
-
-    q_vec = embed_images([query_image_path])[0]  # 512-d, cosine-ready
-
+def retrieve_images_by_image(query_image_path: str, k: int = 5, where: dict | None=None):
+    q_vec = embed_images([query_image_path])[0]
     res = image_db._collection.query(
         query_embeddings=[q_vec.tolist()],
         n_results=k,
@@ -166,29 +122,15 @@ def retrieve_images_by_image(query_image_path: str, k: int = 5, where: dict | No
     )
     return _unwrap(res)
 
-print("✅ Image retrieval ready")
-
-
-
-
-# ================================
-# Demo 1 — Article similarity search (no filter)
-# ================================
-
 q = "cozy restaurant with noodles and warm atmosphere"
-
-ids, docs, metas, dists = retrieve_articles(q, k=5, where=None)
+ids, docs, metas, dists = retrieve_articles(q, k=5,where=None)
 print_hits(ids, docs, metas, dists, title="Demo 1 — Article similarity search (no filter)")
 
 print("✅ Demo 1 complete")
 
-# ================================
-# Demo 2 — Article similarity search + metadata filter
-# ================================
+
 
 q = "handmade pasta and romantic dinner"
-
-# ---- metadata constraint (must exist in your dataset) ----
 where_filter = {"location": "Pasadena"}  # adjust if needed
 
 ids, docs, metas, dists = retrieve_articles(q, k=5, where=where_filter)
@@ -199,11 +141,6 @@ else:
     print_hits(ids, docs, metas, dists, title="Demo 2 — Article similarity search + metadata filter")
 
 print("✅ Demo 2 complete")
-
-
-# ================================
-# Demo 3 — Image similarity search (image→image)
-# ================================
 
 meta_all = image_db._collection.get(include=["metadatas"])["metadatas"]
 
@@ -218,14 +155,9 @@ print(f"Query image: {query_img}")
 img = Image.open(query_img)
 img.thumbnail((300, 300))
 img.show()
-# display(Image.open(query_img))
 
-# 1. Create an optional metadata filter for recipe images
-# Set to None if you don't need filter
-image_where = {"cuisine": "Italian"}
-
-# 2. Retrieve the top-5 most similar images using query_img
-ids, docs, metas, dists = retrieve_images_by_image(query_img, k=5, where=image_where)
+image_where = {"cuisine":"Italian"}
+retrieve_images_by_image(query_img, k=5, where=image_where)
 
 # 3. Display the retrieved results with metadata
 if len(ids) == 0:
@@ -235,6 +167,52 @@ else:
 
 print("✅ Demo 3 complete")
 print("🎉 Similarity Retrieval with Metadata Filtering COMPLETE")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
