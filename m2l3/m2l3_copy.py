@@ -1,13 +1,5 @@
-# ================================
-# Import environment
-# (Dependencies were installed in Lesson 1)
-# ================================
-
-# Standard library
 import os
 from pathlib import Path
-
-# Third-party
 import numpy as np
 import torch
 from PIL import Image
@@ -15,14 +7,10 @@ from langchain_chroma import Chroma
 from sentence_transformers import SentenceTransformer
 from transformers import CLIPModel, CLIPProcessor
 
-print("✅ Environment ready")
+print("environment ready")
 
 
-# ================================
-# Verify vector database
-# ================================
-
-DB_DIR = str((Path.home() / "chroma_multimodal").resolve())
+DB_DIR = str((Path.home()/"chroma_multimodal").resolve())
 
 if not os.path.isdir(DB_DIR):
     raise RuntimeError(
@@ -30,11 +18,12 @@ if not os.path.isdir(DB_DIR):
         "Please run Lesson 1 (Multimodal Vector Index Construction) first."
     )
 
+
 article_db = Chroma(collection_name="restaurant_articles", persist_directory=DB_DIR)
-image_db   = Chroma(collection_name="food_images",          persist_directory=DB_DIR)
+image_db = Chroma(collection_name="food_images", persist_directory=DB_DIR)
 
 n_articles = article_db._collection.count()
-n_images   = image_db._collection.count()
+n_images = image_db._collection.count()
 
 if n_articles <= 0 or n_images <= 0:
     raise RuntimeError(
@@ -44,25 +33,18 @@ if n_articles <= 0 or n_images <= 0:
 print(f"✅ Article vectors: {n_articles}")
 print(f"✅ Image vectors:   {n_images}")
 
-# ================================
-# Initialize embedding models
-# ================================
 
-# ---- Text embedding model (384-d) ----
 text_model = SentenceTransformer("all-MiniLM-L6-v2")
 
-def embed_texts(texts, batch_size=64):
+def embed_texts(texts, batch_size = 64):
     return text_model.encode(
         texts,
         batch_size=batch_size,
         show_progress_bar=False,
-        normalize_embeddings=True,  # cosine-ready
+        normalize_embeddings=True,
     ).astype(np.float32)
 
-print("✅ Text embedder ready")
 
-
-# ---- CLIP embedding model (512-d) for image + query text ----
 device = "cpu"
 clip_name = "openai/clip-vit-base-patch32"
 clip_model = CLIPModel.from_pretrained(clip_name).to(device)
@@ -76,47 +58,43 @@ def embed_images(paths, batch_size=16):
         batch = paths[i:i+batch_size]
         imgs = [Image.open(p).convert("RGB") for p in batch]
         inputs = clip_processor(images=imgs, return_tensors="pt").to(device)
-        feats = clip_model.get_image_features(**inputs)          # (B,512)
-        feats = feats / feats.norm(dim=-1, keepdim=True)         # cosine-ready
+        feats = clip_model.get_image_features(**inputs)
+        feats = feats/feats.norm(dim=-1, keepdim=True)
         vecs.append(feats.cpu().numpy().astype(np.float32))
     return np.vstack(vecs)
+
 
 @torch.no_grad()
 def embed_query_clip_text(query: str):
     inputs = clip_processor(text=[query], return_tensors="pt", padding=True).to(device)
-    feats = clip_model.get_text_features(**inputs)              # (1,512)
-    feats = feats / feats.norm(dim=-1, keepdim=True)            # cosine-ready
+    feats = clip_model.get_text_features(**inputs)
+    feats = feats/feats.norm(dim=-1, keepdim=True)
     return feats[0].cpu().numpy().astype(np.float32)
 
-print("✅ CLIP embedders ready")
-
-
-# ================================
-# Utilities
-# ================================
 
 def _unwrap(res: dict):
     """Chroma returns lists-of-lists; unwrap the first query."""
-    ids   = res.get("ids", [[]])[0]
-    docs  = res.get("documents", [[]])[0]
+    ids = res.get("ids", [[]])[0]
+    docs = res.get("documents", [[]])[0]
     metas = res.get("metadatas", [[]])[0]
     dists = res.get("distances", [[]])[0]
     return ids, docs, metas, dists
 
+
+
 def _to_similarity(dists):
-    """Convert 'smaller is better' distance to 'larger is better' similarity."""
     d = np.array(dists, dtype=np.float32)
-    return 1.0 - d
+    return 1.0-d
+
 
 def _minmax(x):
-    """Min-max normalize to [0, 1] with safe handling for constant arrays."""
     x = np.array(x, dtype=np.float32)
     if x.size == 0:
         return x
-    lo, hi = float(x.min()), float(x.max())
-    if abs(hi - lo) < 1e-8:
-        return np.ones_like(x)  # all equal -> treat as same confidence
-    return (x - lo) / (hi - lo)
+    lo, hi = float(x.min()), float(x.max()),
+    if abs(hi-lo) < 1e-8:
+        return np.ones_like(x)
+    return (x-lo)/(hi-lo)
 
 def print_hits(ids, docs, metas, scores, title: str, max_chars: int = 140):
     print(f"\n=== {title} ===")
@@ -136,12 +114,8 @@ def print_hits(ids, docs, metas, scores, title: str, max_chars: int = 140):
         print(f"[{i+1}] id={doc_id} | cuisine={cuisine} | location={location} | source={source} | score={score:.4f}")
         print(f"{snippet}")
 
-# ================================
-# Retrieval functions
-# ================================
-
 def retrieve_articles(query: str, k: int = 5, where: dict | None = None):
-    q_vec = embed_texts([query])[0]  # 384-d
+    q_vec = embed_texts([query])[0]
     res = article_db._collection.query(
         query_embeddings=[q_vec.tolist()],
         n_results=k,
@@ -164,12 +138,7 @@ def retrieve_images_by_text(query: str, k: int = 5, where: dict | None = None):
     sims = _to_similarity(dists)
     return ids, docs, metas, sims
 
-print("✅ Retrieval functions ready")
 
-
-# ================================
-# Multimodal fusion
-# ================================
 
 def fuse_rank(
         query: str,
@@ -227,7 +196,6 @@ def fuse_rank(
     top_n = max(0, min(int(top_n), len(rows)))
     return rows[:top_n]
 
-
 def print_fused(rows, title: str, max_chars: int = 90):
     print(f"\n=== {title} ===")
     for idx, r in enumerate(rows, start=1):
@@ -240,8 +208,6 @@ def print_fused(rows, title: str, max_chars: int = 90):
             f"(text={r['text_score']:.4f}, img={r['img_score']:.4f})"
         )
         print(snippet)
-
-
 
 # ================================
 # Demo 1 — Multimodal fusion (no filters)
@@ -325,3 +291,69 @@ print_fused(rows_3b, title="Demo 3B — Image-heavy fusion (w_text=0.3, w_img=0.
 
 print("✅ Demo 3 complete")
 print("🎉 Multimodal Similarity Fusion and Retrieval Ranking COMPLETE")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
